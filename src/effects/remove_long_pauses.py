@@ -68,7 +68,7 @@ def remove_long_pauses(
     if not starts:
         print("No long pauses detected.")
         print("Nothing to remove.")
-        return "/content/output.mp4"
+        return input_video
     # ---------------------------------------------------------
     # Get video duration
     # ---------------------------------------------------------
