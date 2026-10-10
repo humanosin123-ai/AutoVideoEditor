@@ -79,6 +79,7 @@ def get_keep_parts():
         if(final_sentence["gap_cost"]["cost"]==0 and final_sentence["match_percent"]==100):
             target = transcription_sentences[final_sentence["transcription_sentence_index"]]
             interval = [round(max(0,target.start.total_seconds()-START_PADDING),2), round(min(target.end.total_seconds()+END_PADDING,duration),2)]
+            print(interval)
             keep_intervals.append([interval])
         elif(final_sentence["gap_cost"]["cost"]!=0):
             temp_interval = []
@@ -102,7 +103,6 @@ def get_keep_parts():
             temp_interval[0][0] = (round(max(0,temp_interval[0][0]-START_PADDING),2))
             temp_interval[-1][1] = (round(min(duration,temp_interval[-1][1]+END_PADDING),2))
             keep_intervals.append(temp_interval)
-    print(keep_intervals)
     keep_intervals = merge_intervals(keep_intervals)
     return keep_intervals
 
