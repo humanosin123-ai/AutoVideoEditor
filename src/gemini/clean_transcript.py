@@ -163,6 +163,7 @@ Before answering, verify:
 3. All clearly abandoned retakes and false starts are removed.
 4. Intentional and distant repetitions are preserved.
 5. The result can be produced from the input by deletion alone.
+6. There is no consecutive repetition in final output.
 
 Output ONLY the cleaned transcript.
 
