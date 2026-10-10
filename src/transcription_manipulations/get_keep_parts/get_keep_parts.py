@@ -102,6 +102,7 @@ def get_keep_parts():
             temp_interval[0][0] = (round(max(0,temp_interval[0][0]-START_PADDING),2))
             temp_interval[-1][1] = (round(min(duration,temp_interval[-1][1]+END_PADDING),2))
             keep_intervals.append(temp_interval)
+    print(keep_intervals)
     keep_intervals = merge_intervals(keep_intervals)
     return keep_intervals
 
