@@ -24,21 +24,19 @@ def remove_long_pauses(
     print("-" * 80)
 
     result = (
-    ffmpeg
-    .input(input_video)
-    .filter(
-        "silencedetect",
-        n="-35dB",
-        d=min_pause
+        ffmpeg
+        .input(input_video)
+        .filter(
+            "silencedetect",
+            n="-35dB",
+            d=min_pause
+        )
+        .output("null", format="null")
+        .run(
+            capture_stderr=True,
+            capture_stdout=True
+        )
     )
-    .output("null", format="null")
-    .run(
-        capture_stderr=True,
-        capture_stdout=True
-    )
-    )
-
-    print(result[1].decode("utf-8"))  # stderr
 
     log = result[1].decode("utf-8")
 
