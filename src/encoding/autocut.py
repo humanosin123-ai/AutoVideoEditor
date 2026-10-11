@@ -23,7 +23,7 @@ def _run(cmd, label):
     return r.returncode == 0
 
 
-def autocut_video(video_path, merged_parts, out="output.mp4"):
+def autocut_video(video_path, merged_parts, out="/content/output.mp4"):
     print("=" * 60)
     print("AUTOCUT VIDEO")
     print("=" * 60)
