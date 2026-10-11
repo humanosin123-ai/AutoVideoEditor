@@ -37,18 +37,16 @@ def gap_cost(list1, list2):
     }
 
 def match_percentage(list1, list2):
+    if not list1:
+        return 0
+
     i = 0
-    matched = 0
 
     for word in list2:
         if i < len(list1) and word == list1[i]:
-            matched += 1
             i += 1
 
-    if len(list1) == 0:
-        return 0
-
-    return (matched / len(list1)) * 100
+    return (i / len(list1)) * 100
 
 def is_similar(candidate, prime_candidate,clean_transcription_sentences):
         candidate_clean_transcript = clean_transcription_sentences[candidate["clean_sentence_index"]]

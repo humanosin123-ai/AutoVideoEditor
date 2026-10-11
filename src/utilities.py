@@ -19,7 +19,8 @@ def format_srt_time(seconds):
     )
 
 def normalize(word):
-        return re.sub(r"[^\w']", "", word.lower())
+    print(word)
+    return re.sub(r"[^\w'\s]", "", word.lower())
 
 def extract_audio(video_path):
 
