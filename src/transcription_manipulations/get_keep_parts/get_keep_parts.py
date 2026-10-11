@@ -76,7 +76,6 @@ def get_keep_parts():
     END_PADDING = 0.3
     keep_intervals = []
     for final_sentence in final_sentences:
-        print(final_sentence)
         if(final_sentence["gap_cost"]["cost"]==0 and final_sentence["match_percent"]==100):
             target = transcription_sentences[final_sentence["transcription_sentence_index"]]
             interval = [round(max(0,target.start.total_seconds()-START_PADDING),2), round(min(target.end.total_seconds()+END_PADDING,duration),2)]
