@@ -53,7 +53,6 @@ def is_similar(candidate, prime_candidate,clean_transcription_sentences):
         prime_clean_transcript = clean_transcription_sentences[prime_candidate["clean_sentence_index"]]
         similarity = SequenceMatcher(None, candidate_clean_transcript, prime_clean_transcript).ratio() * 100
         if similarity >= 80:
-            print(candidate.content + "  ______  "+ prime_candidate.content)
             return True
         else:
             return False
@@ -63,7 +62,6 @@ def is_taken_by_later_sentence(candidate,prime_candidates, clean_transcription_s
         taken = False
         for prime_candidate in prime_candidates:
             if(candidate["transcription_sentence_index"]==prime_candidate["transcription_sentence_index"] and candidate["clean_sentence_index"]>prime_candidate["clean_sentence_index"] and is_similar(candidate,prime_candidate, clean_transcription_sentences)):
-                print(candidate,prime_candidate["transcription_sentence_index"])
                 taken = True
                 break
         return taken
