@@ -1,7 +1,7 @@
 from google import genai
 import os
 def clean_transcript(transcript_path):
-    os.environ["GEMINI_API_KEY"] = "AQ.Ab8RN6JPeY7OaKbkwFkdF-3T1a2OCbJzy710a9uSaBzY5tyaEQ"
+    os.environ["GEMINI_API_KEY"] = "AQ.Ab8RN6L0q6TCFeoPbL0e06b0yrA7uJmZ8XkzvLQ5qmBV6CIybw"
 
     client = genai.Client()
 
