@@ -1,14 +1,15 @@
 from google import genai
 import os
 from dotenv import load_dotenv
+load_dotenv(override=True)
 
 def clean_transcript(transcript_path):
+    key = os.getenv("GEMINI_API_KEY")
 
-    load_dotenv()
+    if not key:
+        raise ValueError("GEMINI_API_KEY not found")
 
-    print("testtttttttt")
-
-    client = genai.Client( api_key=os.getenv("GEMINI_API_KEY"))
+    client = genai.Client(api_key=key)
 
     with open(transcript_path, "r", encoding="utf-8") as f:
         transcription = f.read()
