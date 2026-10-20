@@ -13,6 +13,9 @@ MAX_GAP = 15           # max extra raw words (stumbles) allowed between two clea
 LOOKBACK = 400        # how many tokens back from the bound to search
 FUZZY = 0.8           # word similarity needed to count as equal
 ANCHORS=3
+GAP_SPLIT = 6      # matched words further apart than this (in raw tokens) belong to different clusters
+MIN_CLUSTER = 3    # a cluster with fewer matched words than this is treated as noise
+MIN_CUT_GAP = 0.4  # seconds, gaps shorter than this are NOT cut out
 
 @lru_cache(maxsize=None)
 def words_equal(a, b):
@@ -20,9 +23,22 @@ def words_equal(a, b):
         return True
     return SequenceMatcher(None, a, b).ratio() >= FUZZY
 
+def prune(matched, clean_len):
+    """Drop isolated matches (common words picked up from neighbouring sentences)."""
+    if not matched:
+        return []
+    clusters = [[matched[0]]]
+    for t in matched[1:]:
+        if t - clusters[-1][-1] - 1 > GAP_SPLIT:
+            clusters.append([t])
+        else:
+            clusters[-1].append(t)
+    need = min(MIN_CLUSTER, clean_len)
+    return [t for c in clusters if len(c) >= need for t in c]
+
 
 def match_from(clean, stream, start, limit):
-    end = min(limit, start + len(clean) * 3 + MAX_GAP)
+    end = min(limit, start + len(clean) * 2 + 5)
     window = stream[start:end]
     m, n = len(clean), len(window)
 
@@ -55,7 +71,7 @@ def find_sentence(clean, stream, upper, lookback=LOOKBACK, min_score=MIN_SCORE):
         for c in range(min(ANCHORS, len(clean))):
             if not words_equal(clean[c], stream[start]):
                 continue
-            matched = match_from(clean[c:], stream, start, upper)
+            matched = prune(match_from(clean[c:], stream, start, upper), len(clean))
             if len(matched) / len(clean) >= min_score:
                 return matched
     return None
@@ -123,7 +139,13 @@ def get_keep_parts():
             [words[a].start.total_seconds(), words[b].end.total_seconds()]
             for a, b in runs
         ]
-
+        merged = [intervals[0]]
+        for s_, e_ in intervals[1:]:
+            if s_ - merged[-1][1] < MIN_CUT_GAP:
+                 merged[-1][1] = e_
+        else:
+            merged.append([s_, e_])
+        intervals = merged
         # padding, clamped so it doesn't leak into neighbouring (deleted) words
         first, last = runs[0][0], runs[-1][1]
         prev_end = words[first - 1].end.total_seconds() if first > 0 else 0.0
