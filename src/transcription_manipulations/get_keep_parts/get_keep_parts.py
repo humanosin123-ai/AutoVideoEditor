@@ -8,20 +8,21 @@ from AutoVideoEditor.src.transcription_manipulations.get_keep_parts.merge_interv
 
 START_PADDING = 0.2
 END_PADDING = 0.3
-MIN_SCORE = 0.85      # fraction of clean words that must be found
-MAX_GAP = 15           # max extra raw words (stumbles) allowed between two clean words
-LOOKBACK = 400        # how many tokens back from the bound to search
-FUZZY = 0.8           # word similarity needed to count as equal
-ANCHORS=3
-GAP_SPLIT = 6      # matched words further apart than this (in raw tokens) belong to different clusters
-MIN_CLUSTER = 3    # a cluster with fewer matched words than this is treated as noise
-MIN_CUT_GAP = 0.4  # seconds, gaps shorter than this are NOT cut out
+MIN_SCORE = 0.85     # fraction of clean words that must be found
+LOOKBACK = 400       # how many tokens back from the bound to search
+FUZZY = 0.8          # word similarity needed to count as equal
+ANCHORS = 3          # the sentence may start at any of its first N clean words
+GAP_SPLIT = 6        # matched words further apart than this (in raw tokens) belong to different clusters
+MIN_CLUSTER = 3      # a cluster with fewer matched words than this is treated as noise
+MIN_CUT_GAP = 0.4    # seconds, gaps shorter than this are NOT cut out
+
 
 @lru_cache(maxsize=None)
 def words_equal(a, b):
     if a == b:
         return True
     return SequenceMatcher(None, a, b).ratio() >= FUZZY
+
 
 def prune(matched, clean_len):
     """Drop isolated matches (common words picked up from neighbouring sentences)."""
@@ -38,6 +39,7 @@ def prune(matched, clean_len):
 
 
 def match_from(clean, stream, start, limit):
+    """Best in-order (LCS) match of `clean` inside a window of the stream starting at `start`."""
     end = min(limit, start + len(clean) * 2 + 5)
     window = stream[start:end]
     m, n = len(clean), len(window)
@@ -66,6 +68,7 @@ def match_from(clean, stream, start, limit):
 
 
 def find_sentence(clean, stream, upper, lookback=LOOKBACK, min_score=MIN_SCORE):
+    """Search backward from `upper`, return the LATEST good match (token indices) or None."""
     lowest = 0 if lookback is None else max(0, upper - lookback)
     for start in range(upper - 1, lowest - 1, -1):
         for c in range(min(ANCHORS, len(clean))):
@@ -103,6 +106,7 @@ def get_keep_parts():
     for k in range(len(clean_sentences) - 1, -1, -1):
         clean = [t for t in normalize(clean_sentences[k]).split(" ") if t]
         if not clean:
+            print(f"[WARN] sentence {k} is empty after normalize: {clean_sentences[k]!r}")
             continue
 
         matched = find_sentence(clean, stream, upper)
@@ -118,6 +122,16 @@ def get_keep_parts():
             matches[k] = matched
         else:
             print(f"[WARN] sentence {k} not matched: {clean_sentences[k][:60]!r}")
+
+    # ---------- report: where did each sentence land? ----------
+    for k, m in enumerate(matches):
+        sent = clean_sentences[k][:50]
+        if not m:
+            print(f"{k:3d} NO MATCH | {sent!r}")
+        else:
+            t0 = words[owner[m[0]]].start.total_seconds()
+            t1 = words[owner[m[-1]]].end.total_seconds()
+            print(f"{k:3d} {t0:8.2f}-{t1:8.2f} | {sent!r}")
 
     # ---------- tokens -> time intervals ----------
     keep_intervals = []
@@ -139,13 +153,16 @@ def get_keep_parts():
             [words[a].start.total_seconds(), words[b].end.total_seconds()]
             for a, b in runs
         ]
+
+        # don't cut out tiny gaps
         merged = [intervals[0]]
         for s_, e_ in intervals[1:]:
             if s_ - merged[-1][1] < MIN_CUT_GAP:
-                 merged[-1][1] = e_
-        else:
-            merged.append([s_, e_])
+                merged[-1][1] = e_
+            else:
+                merged.append([s_, e_])
         intervals = merged
+
         # padding, clamped so it doesn't leak into neighbouring (deleted) words
         first, last = runs[0][0], runs[-1][1]
         prev_end = words[first - 1].end.total_seconds() if first > 0 else 0.0
