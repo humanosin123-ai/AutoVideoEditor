@@ -15,171 +15,77 @@ def clean_transcript(transcript_path):
         transcription = f.read()
 
     prompt = f"""
-You are a transcript cleaning system.
+You are a transcript cleaning system. The input is a raw ASR transcript of a speaker who often re-records lines. Produce the speaker's FINAL INTENDED SPEECH by DELETING abandoned material.
 
-Reconstruct the speaker's FINAL INTENDED SPEECH from the raw ASR transcript.
+## HARD CONSTRAINT: DELETION ONLY
+- Output may only be made by deleting words or contiguous chunks from the input.
+- Never add, change, replace, reorder, paraphrase, or fix grammar.
+- Never splice words from different places together. Each kept sentence must come from one place in the input (minus deleted chunks).
 
-## CORE RULE — DELETION ONLY
+## YOUR MAIN JOB: FIND AND REMOVE RETAKES
+Speakers often say a line, stumble or dislike it, and say it again, sometimes several times in a row. Only the LAST complete attempt is the final speech. Earlier attempts must be deleted.
 
-The output may ONLY be created by deleting words or contiguous chunks from the input.
+Method:
+1. Scan the transcript in order. Whenever consecutive or near-consecutive sentences are about the same point or start with the same words, treat them as a GROUP OF TAKES (usually within the next 1-4 sentences).
+2. Within the group, pick the take that is the last complete and fluent one. Delete all earlier takes in the group entirely, including their fillers and trailing fragments.
+3. If a take is cut off mid-sentence and the speaker starts again, delete the cut-off part.
+4. If an earlier take has extra content that the later take lacks, still delete it, because the later take is the speaker's final choice. Exception: the earlier sentence says something clearly different that the later one doesn't replace; then keep both.
 
-NEVER:
+Signals that a take was abandoned:
+- The sentence is cut off, or ends with a dash or trailing "..." and is followed by a fresh start
+- The next sentence starts with the same or nearly the same words
+- Self-corrections: "sorry", "no", "wait", "let me say that again", "let me rephrase", "I mean", "actually", "rather", "in other words", "one more time", "take two"
+- The speaker stumbles, stutters, or restarts after a pause or filler
 
-* add, change, replace, or reorder words
-* paraphrase or correct grammar
-* combine separate attempts
-* stitch words from different regions together
-* try to cut single word(s) from a sentence unless very necessary.
-Every output word must exist in the input and remain in its original order.
+## WHAT TO KEEP
+- Repetition that is clearly deliberate or far apart (separated by several unrelated sentences) stays.
+- A later sentence that adds new information and doesn't replace the earlier one stays.
+- Fillers (um, uh, like, you know) stay in kept speech. Delete them only when they're inside deleted material.
+- When you cannot tell if it's a retake, check distance: same idea within a few sentences, almost always a retake, so delete the earlier one. Far apart and not a restart, keep.
 
-## RETAKES AND FALSE STARTS
+## EDITING COMMANDS
+If the speaker says "remove that", "cut that", "don't include that", follow it and delete the instruction too. Delete repair phrases ("let me say that again", "sorry", "I mean") along with the abandoned text.
 
-Remove clearly abandoned speech, including:
+## EXAMPLES
 
-* false starts
-* immediate retakes
-* self-corrections
-* accidental repetitions
-* incomplete thoughts that are immediately abandoned
+Example 1 (restart, 3 takes)
+Input: "So today we're going to talk about— So today we're going to talk about how to um how to start a garden. So today we're going to talk about how to start a garden from scratch."
+Output: "So today we're going to talk about how to start a garden from scratch."
 
-A false start does NOT need to repeat any words.
+Example 2 (different wording, same point)
+Input: "The deadline is Friday. Actually, the deadline for the report is Friday afternoon."
+Output: "Actually, the deadline for the report is Friday afternoon."
+(Remove the repair word only if it can be cleanly cut as a leading chunk.)
 
-Example:
+Example 3 (explicit repair)
+Input: "I wanted to— no, let me say that again. I decided to postpone it."
+Output: "I decided to postpone it."
 
-Input:
-"I wanted to explain the budget— [UM] let's look at the timeline first."
+Example 4 (continuation, keep the fuller version)
+Input: "The library closes at six. The library closes at six on weekdays, but stays open until eight on Saturdays."
+Output: "The library closes at six on weekdays, but stays open until eight on Saturdays."
 
-Output:
-"Let's look at the timeline first."
+Example 5 (retake after a fluff-up, earlier one is longer)
+Input: "We launched in March and the numbers were uh the numbers were really strong, like really really strong in the first week. We launched in March and the numbers were really strong."
+Output: "We launched in March and the numbers were really strong."
 
-The abandoned phrase can be completely different from the final attempt.
+Example 6 (distant repetition, KEEP BOTH)
+Input: "The northern route is shorter. We stopped for lunch. The weather turned. The northern route is shorter."
+Output: "The northern route is shorter. We stopped for lunch. The weather turned. The northern route is shorter."
 
-Example:
-
-Input:
-"The deadline is Friday. Actually, the deadline for the report is Friday afternoon."
-
-Output:
-"The deadline for the report is Friday afternoon."
-
-## DO NOT OVER-CLEAN
-
-Do NOT remove speech merely because:
-
-* it sounds awkward
-* it is grammatically incorrect
-* it expresses an idea mentioned earlier
-* it contains filler words
-* it is semantically similar to another distant passage
-
-Intentional repetition and explanation must be preserved.
-
-When uncertain whether something was abandoned, KEEP it.
-
-## EXPLICIT REPAIRS
-
-When the speaker explicitly signals a replacement, such as:
-"let me say that again", "let me rephrase that", "I mean", "no, what I mean is", "actually", "rather", or "in other words":
-
-Treat the preceding abandoned formulation as deleted when the following speech clearly replaces it.
-
-Keep the replacement speech.
-Remove the repair instruction itself.
-
-Example:
-"I wanted to— no, let me say that again. I decided to postpone it."
-→ "I decided to postpone it."
-
-Example:
-"The first option is— actually, let me rephrase that. The second option is safer."
-→ "The second option is safer."
-
-## REPETITION VS CONTINUATION
-
-Do not automatically delete a passage just because it expresses a similar idea.
-
-The key distinction is whether the later passage is:
-
-* a genuinely new explanation → KEEP
-* a continuation that adds meaningful information → KEEP
-* a nearby reformulation that replaces the earlier attempt → DELETE the abandoned version
-* a near-duplicate with no meaningful new information → DELETE the duplicate
-
-Example of a continuation:
-
-Input:
-"The library closes at six.
-The library closes at six on weekdays, but stays open until eight on Saturdays."
-
-Output:
-"The library closes at six on weekdays, but stays open until eight on Saturdays."
-
-Example of a genuine repetition:
-
-Input:
-"The northern route is shorter.
-
-Several unrelated sentences.
-
-The northern route is shorter."
-
-Output:
-KEEP BOTH.
-
-Example of a near-duplicate:
-
-Input:
-"I'll send the document tomorrow.
-I'll send the document tomorrow."
-
-Output:
-"I'll send the document tomorrow."
-
-When two nearby passages are highly similar, prefer the version that contains the speaker's complete intended information. Do not keep both merely because the second version contains a few additional words.
-
-When uncertain whether a repetition is intentional or a retake, KEEP it.
-
-
-## FILLERS
-
-Keep fillers such as "um", "uh", "like", and "you know" when they belong to valid final speech.
-
-If a filler occurs inside an abandoned passage, delete it with that passage.
-
-## EDITING INSTRUCTIONS
-
-If the speaker says things like "remove that", "cut that", or "don't include that", treat them as editing instructions, follow them, and remove the instruction itself.
-
-## ORDER
-
-Preserve the exact original chronological order.
-
-Never combine separate transcript regions to create a better sentence.
-
-**STRICT SOURCE-REGION PRESERVATION:**
-Every output sentence must be derived exclusively from its original source sentence/region. You may delete words or contiguous chunks from that region, but you must never combine words from different source sentences/regions, even when they describe the same idea or one region appears to complete another. Use surrounding regions only to identify abandoned speech or retakes; never use them to complete, repair, or replace speech in another region. Preserve the original order of all retained words. If a sentence cannot be cleaned without borrowing words from another region, do not borrow them.
-
-
-## VALIDATION
-
-Before answering, verify:
-
-1. Every output word exists in the input.
+## PROCESS
+Silently, before answering: list the retake groups, choose the final take in each, delete the rest. Then verify:
+1. Every output word exists in the input, in the original order.
 2. Nothing was added, changed, or reordered.
-3. All clearly abandoned retakes and false starts are removed.
-4. Intentional and distant repetitions are preserved.
-5. The result can be produced from the input by deletion alone.
-6. There is no consecutive repetition in final output.
+3. No two consecutive sentences in the output say the same thing.
+4. No cut-off fragments remain.
 
-Output ONLY the cleaned transcript.
-
-Number each sentence:
-
+## OUTPUT
+Output ONLY the cleaned transcript, one sentence per line, numbered:
 0. ...
 1. ...
-2. ...
 
-INPUT:
+<transcript>
 {transcription}
 
 """
