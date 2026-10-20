@@ -9,7 +9,7 @@ from AutoVideoEditor.src.transcription_manipulations.get_keep_parts.merge_interv
 START_PADDING = 0.2
 END_PADDING = 0.3
 MIN_SCORE = 0.85      # fraction of clean words that must be found
-MAX_GAP = 3           # max extra raw words (stumbles) allowed between two clean words
+MAX_GAP = 15           # max extra raw words (stumbles) allowed between two clean words
 LOOKBACK = 400        # how many tokens back from the bound to search
 FUZZY = 0.7           # word similarity needed to count as equal
 
