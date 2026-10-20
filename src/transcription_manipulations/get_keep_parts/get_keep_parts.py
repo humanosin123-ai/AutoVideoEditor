@@ -22,26 +22,30 @@ def words_equal(a, b):
 
 
 def match_from(clean, stream, start, limit):
-    """Walk forward from `start`, matching clean words in order. Returns matched token indices."""
+    end = min(limit, start + len(clean) * 3 + MAX_GAP)
+    window = stream[start:end]
+    m, n = len(clean), len(window)
+
+    dp = [[0] * (n + 1) for _ in range(m + 1)]
+    for i in range(1, m + 1):
+        for j in range(1, n + 1):
+            if words_equal(clean[i - 1], window[j - 1]):
+                dp[i][j] = dp[i - 1][j - 1] + 1
+            else:
+                dp[i][j] = max(dp[i - 1][j], dp[i][j - 1])
+
     matched = []
-    ci, j = 0, start
-    last_j = start          # position right after the last match
-    gap = 0
-    while ci < len(clean) and j < limit:
-        if words_equal(clean[ci], stream[j]):
-            matched.append(j)
-            ci += 1
-            j += 1
-            last_j = j
-            gap = 0
+    i, j = m, n
+    while i > 0 and j > 0:
+        if words_equal(clean[i - 1], window[j - 1]) and dp[i][j] == dp[i - 1][j - 1] + 1:
+            matched.append(start + j - 1)
+            i -= 1
+            j -= 1
+        elif dp[i - 1][j] >= dp[i][j - 1]:
+            i -= 1
         else:
-            gap += 1
-            j += 1
-            if gap > MAX_GAP:
-                # this clean word isn't in the raw words, skip it and go back
-                ci += 1
-                j = last_j
-                gap = 0
+            j -= 1
+    matched.reverse()
     return matched
 
 
