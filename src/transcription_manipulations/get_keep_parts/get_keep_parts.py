@@ -1,125 +1,113 @@
 import re
 import srt
 import ffmpeg
+from functools import lru_cache
+from difflib import SequenceMatcher
 from AutoVideoEditor.src.utilities import normalize
 from AutoVideoEditor.src.transcription_manipulations.get_keep_parts.merge_intervals import merge_intervals
 
-# alignment scores
-MATCH, MISMATCH, CLEAN_SKIP, RAW_GAP = 2, -3, -3, -1
+START_PADDING = 0.2
+END_PADDING = 0.3
+MIN_SCORE = 0.85      # fraction of clean words that must be found
+MAX_GAP = 3           # max extra raw words (stumbles) allowed between two clean words
+LOOKBACK = 400        # how many tokens back from the bound to search
+FUZZY = 0.8           # word similarity needed to count as equal
 
 
-def _align(cw, region, retake_tolerance):
-    """
-    Semi-global alignment: cw (clean tokens) must be fully consumed,
-    region (raw tokens) can start/end anywhere. Match must end on the last clean word.
-    Among end positions within `retake_tolerance` of the best score, the LATEST wins.
-    Returns (normalized_score, [region indices of matched tokens]) or None.
-    """
-    m, n = len(cw), len(region)
-    H = [[0] * (n + 1) for _ in range(m + 1)]
-    for i in range(1, m + 1):
-        H[i][0] = H[i - 1][0] + CLEAN_SKIP
-        ci, row, prev = cw[i - 1], H[i], H[i - 1]
-        for j in range(1, n + 1):
-            diag = prev[j - 1] + (MATCH if ci == region[j - 1] else MISMATCH)
-            up = prev[j] + CLEAN_SKIP
-            left = row[j - 1] + RAW_GAP
-            row[j] = max(diag, up, left)
+@lru_cache(maxsize=None)
+def words_equal(a, b):
+    if a == b:
+        return True
+    return SequenceMatcher(None, a, b).ratio() >= FUZZY
 
-    last = cw[-1]
-    cands = [(H[m - 1][j - 1] + MATCH, j) for j in range(1, n + 1) if region[j - 1] == last]
-    if not cands:
-        return None
-    best = max(s for s, _ in cands)
-    tol = retake_tolerance * m * MATCH
-    j_end = max(j for s, j in cands if s >= best - tol)   # latest acceptable end
-    score = H[m - 1][j_end - 1] + MATCH
 
-    # traceback (prefers diagonal matches, i.e. the latest raw words)
-    matched = [j_end - 1]
-    i, j = m - 1, j_end - 1
-    while i > 0 and j > 0:
-        cur = H[i][j]
-        equal = cw[i - 1] == region[j - 1]
-        if cur == H[i - 1][j - 1] + (MATCH if equal else MISMATCH):
-            if equal:
-                matched.append(j - 1)
-            i -= 1
-            j -= 1
-        elif cur == H[i][j - 1] + RAW_GAP:
-            j -= 1
+def match_from(clean, stream, start, limit):
+    """Walk forward from `start`, matching clean words in order. Returns matched token indices."""
+    matched = []
+    ci, j = 0, start
+    last_j = start          # position right after the last match
+    gap = 0
+    while ci < len(clean) and j < limit:
+        if words_equal(clean[ci], stream[j]):
+            matched.append(j)
+            ci += 1
+            j += 1
+            last_j = j
+            gap = 0
         else:
-            i -= 1
-    matched.reverse()
-    return score / (m * MATCH), matched
+            gap += 1
+            j += 1
+            if gap > MAX_GAP:
+                # this clean word isn't in the raw words, skip it and go back
+                ci += 1
+                j = last_j
+                gap = 0
+    return matched
 
 
-def get_keep_parts(
-    words_srt_path="/content/transcription.srt",
-    cleaned_path="/content/transcription_cleaned.txt",
-    video_path="/content/video.mp4",
-    start_padding=0.2,
-    end_padding=0.3,
-    lookback_words=600,      # how far back from the current bound to search first (falls back to whole prefix)
-    min_score=0.6,           # min normalized alignment score to accept a sentence
-    retake_tolerance=0.05,   # how much worse a LATER take may score and still win (0 = only exact ties)
-    min_cut_gap=0.0,         # unmatched gaps shorter than this (sec) are not cut out
-):
+def find_sentence(clean, stream, upper):
+    """Search backward from `upper`, return the LATEST good match (list of token indices) or None."""
+    lowest = max(0, upper - LOOKBACK)
+    for start in range(upper - 1, lowest - 1, -1):
+        if not words_equal(clean[0], stream[start]):
+            continue
+        matched = match_from(clean, stream, start, upper)
+        if len(matched) / len(clean) >= MIN_SCORE:
+            return matched
+    return None
+
+
+def get_keep_parts():
     # ---------- load ----------
-    with open(words_srt_path, "r", encoding="utf-8") as f:
+    with open("/content/transcription.srt", "r", encoding="utf-8") as f:
         words = list(srt.parse(f.read()))
 
-    with open(cleaned_path, "r", encoding="utf-8") as f:
+    with open("/content/transcription_cleaned.txt", "r", encoding="utf-8") as f:
         clean_sentences = re.split(r'(?:^\d+\.\s+|\n\d+\.\s+)', f.read())
-        clean_sentences = [x.strip() for x in clean_sentences if x.strip() != ""]
+        clean_sentences = [x for x in clean_sentences if x.strip() != ""]
 
-    duration = float(ffmpeg.probe(video_path)["format"]["duration"])
+    duration = float(ffmpeg.probe("/content/video.mp4")["format"]["duration"])
 
-    # ---------- flatten raw words into a token stream ----------
-    # a SRT word may normalize to 0 or several tokens, so keep a token -> word index map
-    stream, owner = [], []
+    # ---------- flatten words into tokens ----------
+    stream, owner = [], []          # owner[t] = index of the SRT word that token t came from
     for wi, w in enumerate(words):
-        for tok in normalize(w.content).split():
-            stream.append(tok)
-            owner.append(wi)
+        for tok in normalize(w.content).split(" "):
+            if tok:
+                stream.append(tok)
+                owner.append(wi)
 
-    clean_tokens = [normalize(s).split() for s in clean_sentences]
+    # ---------- match from last sentence to first ----------
+    matches = [None] * len(clean_sentences)
+    upper = len(stream)
 
-    # ---------- align from the END to the START (last retake wins) ----------
-    spans = [None] * len(clean_tokens)
-    upper = len(stream)  # exclusive bound: sentence k must end before sentence k+1 starts
-
-    for k in range(len(clean_tokens) - 1, -1, -1):
-        cw = clean_tokens[k]
-        if not cw or upper <= 0:
+    for k in range(len(clean_sentences) - 1, -1, -1):
+        clean = [t for t in normalize(clean_sentences[k]).split(" ") if t]
+        if not clean:
             continue
 
-        result = None
-        for lo in sorted({max(0, upper - lookback_words), 0}, reverse=True):
-            r = _align(cw, stream[lo:upper], retake_tolerance)
-            if r and r[0] >= min_score:
-                result = (r[0], [lo + x for x in r[1]])
-                break
-
-        if result is None:
-            print(f"[WARN] clean sentence {k} not matched: {clean_sentences[k][:60]!r}")
+        matched = find_sentence(clean, stream, upper)
+        if matched:
+            matches[k] = matched
+            upper = matched[0]      # earlier sentences must end before this one starts
             continue
 
-        spans[k] = result
-        upper = result[1][0]  # next (earlier) sentence must end before this one begins
+        # fallback: search everywhere, but don't move `upper`
+        matched = find_sentence(clean, stream, len(stream))
+        if matched:
+            print(f"[WARN] sentence {k} matched outside the order bound: {clean_sentences[k][:60]!r}")
+            matches[k] = matched
+        else:
+            print(f"[WARN] sentence {k} not matched: {clean_sentences[k][:60]!r}")
 
-    # ---------- matched tokens -> time intervals ----------
+    # ---------- tokens -> time intervals ----------
     keep_intervals = []
-    for k, span in enumerate(spans):
-        if span is None:
+    for matched in matches:
+        if not matched:
             continue
-        score, tok_idx = span
-        if score < 0.85:
-            print(f"[INFO] low-confidence match {score:.2f} for sentence {k}: {clean_sentences[k][:60]!r}")
 
-        word_idx = sorted({owner[t] for t in tok_idx})
+        word_idx = sorted({owner[t] for t in matched})
 
-        # group consecutive words into runs; non-matched words inside the span get cut
+        # group consecutive SRT words into runs, gaps between runs are cut out
         runs = []
         for wi in word_idx:
             if runs and wi == runs[-1][1] + 1:
@@ -127,22 +115,21 @@ def get_keep_parts(
             else:
                 runs.append([wi, wi])
 
-        intervals = []
-        for a, b in runs:
-            s, e = words[a].start.total_seconds(), words[b].end.total_seconds()
-            if intervals and s - intervals[-1][1] < min_cut_gap:
-                intervals[-1][1] = e
-            else:
-                intervals.append([s, e])
+        intervals = [
+            [words[a].start.total_seconds(), words[b].end.total_seconds()]
+            for a, b in runs
+        ]
 
-        # padding, clamped so it doesn't bleed into the neighbouring raw words (e.g. a discarded retake)
-        first_w, last_w = runs[0][0], runs[-1][1]
-        prev_end = words[first_w - 1].end.total_seconds() if first_w > 0 else 0.0
-        next_start = words[last_w + 1].start.total_seconds() if last_w + 1 < len(words) else duration
+        # padding, clamped so it doesn't leak into neighbouring (deleted) words
+        first, last = runs[0][0], runs[-1][1]
+        prev_end = words[first - 1].end.total_seconds() if first > 0 else 0.0
+        next_start = words[last + 1].start.total_seconds() if last + 1 < len(words) else duration
 
-        intervals[0][0] = min(intervals[0][0], max(intervals[0][0] - start_padding, prev_end, 0.0))
-        intervals[-1][1] = max(intervals[-1][1], min(intervals[-1][1] + end_padding, next_start, duration))
+        s = intervals[0][0]
+        intervals[0][0] = min(s, max(s - START_PADDING, prev_end))
+        e = intervals[-1][1]
+        intervals[-1][1] = max(e, min(e + END_PADDING, next_start, duration))
 
-        keep_intervals.append([[round(s, 2), round(e, 2)] for s, e in intervals])
+        keep_intervals.append([[round(a, 2), round(b, 2)] for a, b in intervals])
 
     return merge_intervals(keep_intervals)
